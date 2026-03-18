@@ -2,10 +2,11 @@ accelerate
 auto_gptq
 datasets
 deepspeed
+flash-attn>=2.6.3
 matplotlib
 mpmath
 multiprocess
-numpy
+numpy<2.0.0
 pandas
 python_dateutil
 regex
