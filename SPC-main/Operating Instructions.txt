@@ -328,10 +328,11 @@ if __name__ == "__main__":
     tokenizer_path = os.path.join(spc_main_dir, "checkpoints", "Qwen2.5-7B-Instruct")
     if os.path.exists(tokenizer_path):
         print(f"Loading tokenizer from local path: {tokenizer_path}")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
     else:
         print("Local tokenizer not found, downloading from Hugging Face...")
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+    
 
     # 数据集路径
     prm800_data_path = os.path.join(spc_root_dir, "data", "eval", "prm_eval.json")

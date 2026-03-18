@@ -2,8 +2,8 @@ import os
 import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
 
 
 def collect_prm800_data(data_type='prm'):
@@ -32,7 +32,7 @@ def collect_prm800_data(data_type='prm'):
 
     # filter existing files
     if os.path.exists(output_file):
-        with open(output_file, "r") as f:
+        with open(output_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
             existing_files = [json.loads(line)["file_name"] for line in lines]
         merged_data = [data for data in merged_data if data["file_name"] not in existing_files]
@@ -49,7 +49,7 @@ def collect_process_bench_data():
 
     # filter existing files
     if os.path.exists(output_file):
-        with open(output_file, "r") as f:
+        with open(output_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
             existing_files = [json.loads(line)["file_name"] for line in lines]
         remaining_data = [data for data in dataset if data["file_name"] not in existing_files]
@@ -68,7 +68,7 @@ def collect_delta_bench_data():
 
     # filter existing files
     if os.path.exists(output_file):
-        with open(output_file, "r") as f:
+        with open(output_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
             existing_files = [json.loads(line)["file_name"] for line in lines]
         remaining_data = [data for data in dataset if data["file_name"] not in existing_files]
@@ -103,17 +103,11 @@ You need to response a step-by-step analysis:
 {last_step}"""
 
 
-    # 替换 vllm，使用 transformers 加载模型
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Loading model to {device}...")
-    model = AutoModelForCausalLM.from_pretrained(
-        critic_path,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto"
-    )
-    model.eval()
-
-    batch_size = 4 # 因为原生 transformers 没有 vllm 显存管理那么好，减小 batch_size 防止 OOM
+    # vllm 初始化
+    # 如果你的服务器有多张卡，可以把 tensor_parallel_size 改成卡的数量
+    llm = LLM(model=critic_path, gpu_memory_utilization=.95, tensor_parallel_size=1)
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=2048, n=1)
+    batch_size = 512 # vllm 支持大 batch
     
     all_inputs = []
     for data in dataset:
@@ -133,28 +127,15 @@ You need to response a step-by-step analysis:
         
         batch_data = dataset[i:i+batch_size]
         batch_inputs = all_inputs[i:i+batch_size]
+        batch_outputs = llm.generate(batch_inputs, sampling_params)
         
-        # 使用 transformers 进行批量推理
-        inputs = tokenizer(batch_inputs, return_tensors="pt", padding=True, truncation=True, max_length=2048).to(device)
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=2048,
-                temperature=0.0,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id
-            )
-            
-        # 提取生成的回复
-        generated_sequences = outputs[:, inputs.input_ids.shape[1]:]
-        critiques = tokenizer.batch_decode(generated_sequences, skip_special_tokens=True)
-        
-        for data, input_text, critique in zip(batch_data, batch_inputs, critiques):
+        for data, input_text, output in zip(batch_data, batch_inputs, batch_outputs):
+            output_samples = output.outputs
+            critiques = [o.text for o in output_samples]
             save_data = data.copy()
             save_data["system"] = system
             save_data["prompt"] = input_text
-            save_data["response"] = [critique] # 保持原代码格式，response 为一个列表
+            save_data["response"] = critiques
             
             with open(os.path.join(output_file), "a", encoding='utf-8') as f:
                 f.write(json.dumps(save_data, ensure_ascii=False)+"\n")
@@ -206,7 +187,7 @@ def filter_critique(data_type='prm'):
     error_acc = sum(erroneous_step_acc)/len(erroneous_step_acc)
     print(f"File: {output_file}")
     print(f"Total number of data: {data_total_num}")
-    print(f"Valid rato: {data_valid_num/data_total_num}")  # We will collect the invalid data and rerun them several times if valid ratio < 99%
+    print(f"Valid rato: {data_valid_num/data_total_num}")
     print(f"Correct Step Accuracy: {round(correct_acc, 3)}")
     print(f"Erroneous Step Accuracy: {round(error_acc, 3)}")
     print(f"Average Accuracy: {round((correct_acc+error_acc)/2, 3)}")
@@ -231,7 +212,6 @@ def filter_process_bench_critique(data_type='process_bench'):
         start_index = response.find(start_tag) + len(start_tag)
         end_index = response.find(end_tag)
         result = response[start_index:end_index]
-
         if result.lower() == "correct":
             correctness_label = 1
             data_valid_num += 1
@@ -239,22 +219,26 @@ def filter_process_bench_critique(data_type='process_bench'):
             correctness_label = -1
             data_valid_num += 1
             
-        # statistics of dataset accuracy
         if correctness_label != 0:  # valid data
-            dataset_type = data["data_type"]
+            dataset_type = data["source"]
             if dataset_type not in stat_dataset_acc:
                 stat_dataset_acc[dataset_type] = []
-
-            if data[f"{data_type}_human_label"] == correctness_label:
-                stat_dataset_acc[dataset_type].append(1)
-            else:
-                stat_dataset_acc[dataset_type].append(0)
-   
+                
+            if data[f"{data_type}_human_label"] == 1:  # correct step
+                if correctness_label == 1:
+                    stat_dataset_acc[dataset_type].append(1)
+                else:
+                    stat_dataset_acc[dataset_type].append(0)
+            elif data[f"{data_type}_human_label"] == -1:  # erroneous step
+                if correctness_label == -1:
+                    stat_dataset_acc[dataset_type].append(1)
+                else:
+                    stat_dataset_acc[dataset_type].append(0)
+              
     print(f"File: {output_file}")
     print(f"Total number of data: {data_total_num}")
-    print(f"Valid rato: {data_valid_num/data_total_num}") # We will collect the invalid data and rerun them several times if valid ratio < 99%
+    print(f"Valid rato: {data_valid_num/data_total_num}")
     
-    # print detailed statistics of accuracy
     average_acc = []
     for dataset_type, acc in stat_dataset_acc.items():
         if acc:
@@ -265,19 +249,19 @@ def filter_process_bench_critique(data_type='process_bench'):
 
 if __name__ == "__main__":
     
-    # 动态获取绝对路径，避免因为终端所在的目录不同而导致找不到文件
-    current_dir = os.path.dirname(os.path.abspath(__file__)) # D:\SPC\SPC-main\eval
-    spc_main_dir = os.path.dirname(current_dir)              # D:\SPC\SPC-main
-    spc_root_dir = os.path.dirname(spc_main_dir)             # D:\SPC
+    # 动态获取绝对路径
+    current_dir = os.path.dirname(os.path.abspath(__file__)) 
+    spc_main_dir = os.path.dirname(current_dir)              
+    spc_root_dir = os.path.dirname(spc_main_dir)             
     
-    # 优先使用本地已经下载好的 Tokenizer
+    # 优先读取本地下载的 Tokenizer
     tokenizer_path = os.path.join(spc_main_dir, "checkpoints", "Qwen2.5-7B-Instruct")
     if os.path.exists(tokenizer_path):
         print(f"Loading tokenizer from local path: {tokenizer_path}")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, padding_side='left')
     else:
         print("Local tokenizer not found, downloading from Hugging Face...")
-        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct", padding_side='left')
     
     prm800_data_path = os.path.join(spc_root_dir, "data", "eval", "prm_eval.json")
     process_bench_data_path = os.path.join(spc_root_dir, "data", "eval", "process_bench_eval.json")
@@ -303,5 +287,3 @@ if __name__ == "__main__":
     if len(dataset) > 0:
         generate_critique_batch(dataset)
     filter_critique(data_type='delta_bench')
-
- 
