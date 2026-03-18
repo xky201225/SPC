@@ -220,7 +220,7 @@ def filter_process_bench_critique(data_type='process_bench'):
             data_valid_num += 1
             
         if correctness_label != 0:  # valid data
-            dataset_type = data["source"]
+            dataset_type = data.get("source", data.get("data_type", "unknown"))
             if dataset_type not in stat_dataset_acc:
                 stat_dataset_acc[dataset_type] = []
                 
