@@ -11,7 +11,7 @@ MODEL_MAX_LENGTH=4096
 GRADIENT_ACCUMULATION_STEPS=$((TOTAL_BATCH_SIZE / MICRO_TRAIN_BATCH_SIZE / NUM_GPUS))
 
 # SFT model (本地下载的模型路径)
-MODEL_NAME_OR_PATH="checkpoints/SPC-Critic-0"
+MODEL_NAME_OR_PATH="check/SPC-Critic-0"
 
 DATA_DIR=../data
 TRAIN_DATA_PATH=../data/train/data_round2_rl_critic.json

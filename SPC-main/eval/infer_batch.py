@@ -255,7 +255,7 @@ if __name__ == "__main__":
     spc_root_dir = os.path.dirname(spc_main_dir)             
     
     # 优先读取本地下载的 Tokenizer
-    tokenizer_path = os.path.join(spc_main_dir, "checkpoints", "Qwen2.5-7B-Instruct")
+    tokenizer_path = os.path.join(spc_main_dir, "check", "Qwen2.5-7B-Instruct")
     if os.path.exists(tokenizer_path):
         print(f"Loading tokenizer from local path: {tokenizer_path}")
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, padding_side='left')
@@ -268,7 +268,7 @@ if __name__ == "__main__":
     delta_bench_data_path = os.path.join(spc_root_dir, "data", "eval", "delta_bench_eval.json")
     
     # 模型路径
-    critic_path = os.path.join(spc_main_dir, "checkpoints", "SPC-Critic-2")
+    critic_path = os.path.join(spc_main_dir, "check", "SPC-Critic-2")
 
     output_file = os.path.join(critic_path, "critique_process_bench.json")
     dataset = collect_process_bench_data()

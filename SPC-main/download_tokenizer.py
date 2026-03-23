@@ -2,7 +2,7 @@ import os
 from huggingface_hub import snapshot_download
 
 def download_tokenizer():
-    base_dir = "checkpoints"
+    base_dir = "check"
     os.makedirs(base_dir, exist_ok=True)
     
     print("Downloading Qwen2.5-7B-Instruct Tokenizer...")
@@ -12,7 +12,7 @@ def download_tokenizer():
         ignore_patterns=["*.safetensors", "*.bin", "*.pt"], # 忽略所有大权重文件，只下载 Tokenizer 配置
         local_dir_use_symlinks=False
     )
-    print("Tokenizer download complete! Saved to checkpoints/Qwen2.5-7B-Instruct")
+    print("Tokenizer download complete! Saved to check/Qwen2.5-7B-Instruct")
 
 if __name__ == "__main__":
     download_tokenizer()
