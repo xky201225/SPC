@@ -104,7 +104,7 @@ You need to response a step-by-step analysis:
 
 
     # vllm 初始化
-    # 如果你的服务器有多张卡，可以把 tensor_parallel_size 改成卡的数量
+    # 单卡GPU配置
     llm = LLM(model=critic_path, gpu_memory_utilization=.90, tensor_parallel_size=1)
     sampling_params = SamplingParams(temperature=0.0, max_tokens=2048, n=1)
     batch_size = 128 # vllm 支持大 batch
