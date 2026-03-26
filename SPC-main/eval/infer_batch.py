@@ -270,6 +270,11 @@ if __name__ == "__main__":
     # 模型路径
     critic_path = os.path.join(spc_main_dir, "check", "SPC-Critic-2")
 
+    # ==================== 原始测试集 ====================
+    print("\n" + "="*50)
+    print("Testing Original Datasets")
+    print("="*50)
+    
     output_file = os.path.join(critic_path, "critique_process_bench.json")
     dataset = collect_process_bench_data()
     if len(dataset) > 0:
@@ -287,3 +292,105 @@ if __name__ == "__main__":
     if len(dataset) > 0:
         generate_critique_batch(dataset)
     filter_critique(data_type='delta_bench')
+
+    # ==================== 新医学测试集 ====================
+    NEW_DATASETS = ['MedMCQA', 'MedQA', 'ddxplus', 'pubmedqa']
+    new_dataset_dir = os.path.join(spc_root_dir, "data", "eval", "new_dataset")
+    
+    print("\n" + "="*50)
+    print("Testing New Medical Datasets")
+    print("="*50)
+    
+    for dataset_name in NEW_DATASETS:
+        print(f"\n{'='*20} {dataset_name} {'='*20}")
+        
+        # ProcessBench 格式测试
+        process_bench_path = os.path.join(new_dataset_dir, dataset_name, f"{dataset_name.lower() if dataset_name != 'MedQA' else 'medqa'}_process_bench_eval.json")
+        if dataset_name == 'MedMCQA':
+            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "MedMCQA_process_bench_eval.json")
+        elif dataset_name == 'MedQA':
+            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "MedQA_process_bench_eval.json")
+        elif dataset_name == 'ddxplus':
+            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "ddxplus_process_bench_eval.json")
+        elif dataset_name == 'pubmedqa':
+            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "pubmedqa_process_bench_eval.json")
+        
+        if os.path.exists(process_bench_path):
+            print(f"\n--- {dataset_name} ProcessBench ---")
+            output_file = os.path.join(critic_path, f"critique_{dataset_name}_process_bench.json")
+            with open(process_bench_path, "r", encoding="utf-8") as f:
+                dataset = json.load(f)
+            print(f"All {len(dataset)} data...")
+            if os.path.exists(output_file):
+                with open(output_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    existing_files = [json.loads(line)["file_name"] for line in lines]
+                dataset = [data for data in dataset if data["file_name"] not in existing_files]
+            print(f"should process {len(dataset)} files.")
+            if len(dataset) > 0:
+                generate_critique_batch(dataset)
+            filter_process_bench_critique(data_type='process_bench')
+        
+        # PRM 格式测试
+        prm_path = os.path.join(new_dataset_dir, dataset_name, f"{dataset_name.lower() if dataset_name != 'MedQA' else 'medqa'}_prm_eval.json")
+        if dataset_name == 'MedMCQA':
+            prm_path = os.path.join(new_dataset_dir, dataset_name, "MedMCQA_prm_eval.json")
+        elif dataset_name == 'MedQA':
+            prm_path = os.path.join(new_dataset_dir, dataset_name, "MedQA_prm_eval.json")
+        elif dataset_name == 'ddxplus':
+            prm_path = os.path.join(new_dataset_dir, dataset_name, "ddxplus_prm_eval.json")
+        elif dataset_name == 'pubmedqa':
+            prm_path = os.path.join(new_dataset_dir, dataset_name, "pubmedqa_prm_eval.json")
+        
+        if os.path.exists(prm_path):
+            print(f"\n--- {dataset_name} PRM ---")
+            output_file = os.path.join(critic_path, f"critique_{dataset_name}_prm.json")
+            with open(prm_path, "r", encoding="utf-8") as f:
+                raw_dataset = json.load(f)
+            merged_data = []
+            print(f"Processing {len(raw_dataset)} data...")
+            for i, data in enumerate(raw_dataset):
+                if data and isinstance(data, dict):
+                    problem = data["problem"]
+                    partial_solution = data["partial_solution"]
+                    correct_step = data["correct_last_step"]
+                    incorrect_step = data["incorrect_last_step"]
+                    data_id = str(data["id"])
+                    merged_data.append({"problem": problem, "partial_solution": partial_solution, "next_step": correct_step, "prm_human_label": 1, "file_name": data_id+"_c.json"})
+                    merged_data.append({"problem": problem, "partial_solution": partial_solution, "next_step": incorrect_step, "prm_human_label": -1, "file_name": data_id+"_i.json"})
+            if os.path.exists(output_file):
+                with open(output_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    existing_files = [json.loads(line)["file_name"] for line in lines]
+                merged_data = [data for data in merged_data if data["file_name"] not in existing_files]
+            print(f"should process {len(merged_data)} files.")
+            if len(merged_data) > 0:
+                generate_critique_batch(merged_data)
+            filter_critique(data_type='prm')
+        
+        # DeltaBench 格式测试
+        delta_path = os.path.join(new_dataset_dir, dataset_name, f"{dataset_name.lower() if dataset_name != 'MedQA' else 'medqa'}_delta_bench_eval.json")
+        if dataset_name == 'MedMCQA':
+            delta_path = os.path.join(new_dataset_dir, dataset_name, "MedMCQA_delta_bench_eval.json")
+        elif dataset_name == 'MedQA':
+            delta_path = os.path.join(new_dataset_dir, dataset_name, "MedQA_delta_bench_eval.json")
+        elif dataset_name == 'ddxplus':
+            delta_path = os.path.join(new_dataset_dir, dataset_name, "ddxplus_delta_bench_eval.json")
+        elif dataset_name == 'pubmedqa':
+            delta_path = os.path.join(new_dataset_dir, dataset_name, "pubmedqa_delta_bench_eval.json")
+        
+        if os.path.exists(delta_path):
+            print(f"\n--- {dataset_name} DeltaBench ---")
+            output_file = os.path.join(critic_path, f"critique_{dataset_name}_delta_bench.json")
+            with open(delta_path, "r", encoding="utf-8") as f:
+                dataset = json.load(f)
+            print(f"All {len(dataset)} data...")
+            if os.path.exists(output_file):
+                with open(output_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    existing_files = [json.loads(line)["file_name"] for line in lines]
+                dataset = [data for data in dataset if data["file_name"] not in existing_files]
+            print(f"should process {len(dataset)} files.")
+            if len(dataset) > 0:
+                generate_critique_batch(dataset)
+            filter_critique(data_type='delta_bench')
