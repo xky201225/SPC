@@ -45,15 +45,20 @@ def print_object_on_main_process(name: str, obj: object, split_line_color="yello
 
 
 def read_json_or_jsonl_data(data_path: str) -> List:
+    import gzip
     if data_path.endswith('json'):
-        with open(data_path, 'r') as f:
+        with open(data_path, 'r', encoding='utf-8') as f:
             data_list = json.load(f)
     elif data_path.endswith('jsonl'):
-        with open(data_path, 'r') as f:
+        with open(data_path, 'r', encoding='utf-8') as f:
+            lines = f.read().strip().split('\n')
+            data_list = [json.loads(l) for l in lines]
+    elif data_path.endswith('jsonl.gz'):
+        with gzip.open(data_path, 'rt', encoding='utf-8') as f:
             lines = f.read().strip().split('\n')
             data_list = [json.loads(l) for l in lines]
     else:
-        raise ValueError("The data file must end with json or jsonl.")
+        raise ValueError("The data file must end with json, jsonl, or jsonl.gz.")
     
     print_rank_0(f">>> load {len(data_list)} data from {data_path}.")
     return data_list
