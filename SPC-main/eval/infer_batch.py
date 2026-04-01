@@ -40,6 +40,7 @@ def collect_prm800_data(data_type='prm'):
 
     return merged_data
 
+
 def collect_process_bench_data():
 
     with open(process_bench_data_path, "r", encoding="utf-8") as f:
@@ -59,9 +60,30 @@ def collect_process_bench_data():
     print(f"should process {len(remaining_data)} files.")
     return remaining_data
 
+
 def collect_delta_bench_data():
 
     with open(delta_bench_data_path, "r", encoding="utf-8") as f:
+        dataset = json.load(f)
+
+    print(f"All {len(dataset)} data...")
+
+    # filter existing files
+    if os.path.exists(output_file):
+        with open(output_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            existing_files = [json.loads(line)["file_name"] for line in lines]
+        remaining_data = [data for data in dataset if data["file_name"] not in existing_files]
+    else:
+        remaining_data = dataset
+
+    print(f"should process {len(remaining_data)} files.")
+    return remaining_data
+
+
+def collect_medical_data(dataset_name):
+
+    with open(medical_data_paths[dataset_name], "r", encoding="utf-8") as f:
         dataset = json.load(f)
 
     print(f"All {len(dataset)} data...")
@@ -174,25 +196,25 @@ def filter_critique(data_type='prm'):
         if correctness_label != 0:  # valid data
             if data[f"{data_type}_human_label"] == 1:  # correct step
                 if correctness_label == 1:
-                    correct_step_acc.append(1)
+                    correct_step_acc.append(1.0)
                 else:
-                    correct_step_acc.append(0)
-            elif data[f"{data_type}_human_label"] == -1:  # erroneous step
+                    correct_step_acc.append(0.0)
+            elif data[f"{data_type}_human_label"] == -1:  # incorrect step
                 if correctness_label == -1:
-                    erroneous_step_acc.append(1)
+                    erroneous_step_acc.append(1.0)
                 else:
-                    erroneous_step_acc.append(0)
-              
-    correct_acc = sum(correct_step_acc)/len(correct_step_acc)
-    error_acc = sum(erroneous_step_acc)/len(erroneous_step_acc)
-    print(f"File: {output_file}")
-    print(f"Total number of data: {data_total_num}")
-    print(f"Valid rato: {data_valid_num/data_total_num}")
-    print(f"Correct Step Accuracy: {round(correct_acc, 3)}")
-    print(f"Erroneous Step Accuracy: {round(error_acc, 3)}")
-    print(f"Average Accuracy: {round((correct_acc+error_acc)/2, 3)}")
-    print(f"Harmonic Mean: {round(2*correct_acc*error_acc/(correct_acc+error_acc), 3)}")
-
+                    erroneous_step_acc.append(0.0)
+    
+    correct_acc = sum(correct_step_acc) / len(correct_step_acc) * 100 if correct_step_acc else 0.0
+    erroneous_acc = sum(erroneous_step_acc) / len(erroneous_step_acc) * 100 if erroneous_step_acc else 0.0
+    
+    print("="*30)
+    print(f"Correct Step Accuracy: {correct_acc:.2f}%")
+    print(f"Erroneous Step Accuracy: {erroneous_acc:.2f}%")
+    print(f"Average Accuracy: {(correct_acc + erroneous_acc) / 2:.2f}%")
+    print(f"Harmonic Mean: {2 * correct_acc * erroneous_acc / (correct_acc + erroneous_acc) if (correct_acc + erroneous_acc) > 0 else 0:.2f}%")
+    print("="*30)
+    
 
 def filter_process_bench_critique(data_type='process_bench'):
         
@@ -226,26 +248,30 @@ def filter_process_bench_critique(data_type='process_bench'):
                 
             if data[f"{data_type}_human_label"] == 1:  # correct step
                 if correctness_label == 1:
-                    stat_dataset_acc[dataset_type].append(1)
+                    stat_dataset_acc[dataset_type].append({"type": "correct", "acc": 1.0})
                 else:
-                    stat_dataset_acc[dataset_type].append(0)
-            elif data[f"{data_type}_human_label"] == -1:  # erroneous step
+                    stat_dataset_acc[dataset_type].append({"type": "correct", "acc": 0.0})
+            elif data[f"{data_type}_human_label"] == -1:  # incorrect step
                 if correctness_label == -1:
-                    stat_dataset_acc[dataset_type].append(1)
+                    stat_dataset_acc[dataset_type].append({"type": "incorrect", "acc": 1.0})
                 else:
-                    stat_dataset_acc[dataset_type].append(0)
-              
-    print(f"File: {output_file}")
-    print(f"Total number of data: {data_total_num}")
-    print(f"Valid rato: {data_valid_num/data_total_num}")
+                    stat_dataset_acc[dataset_type].append({"type": "incorrect", "acc": 0.0})
     
-    average_acc = []
-    for dataset_type, acc in stat_dataset_acc.items():
-        if acc:
-            average_acc.append(sum(acc)/len(acc))
-            print(f"Dataset Type: {dataset_type}. Accuracy: {round(sum(acc)/len(acc), 3)}.")
-    print(f"Average Accuracy: {round(sum(average_acc)/len(average_acc), 3)}")
-  
+    print("="*30)
+    for dataset_type in stat_dataset_acc:
+        correct_step_acc = [d["acc"] for d in stat_dataset_acc[dataset_type] if d["type"] == "correct"]
+        erroneous_step_acc = [d["acc"] for d in stat_dataset_acc[dataset_type] if d["type"] == "incorrect"]
+        
+        correct_acc = sum(correct_step_acc) / len(correct_step_acc) * 100 if correct_step_acc else 0.0
+        erroneous_acc = sum(erroneous_step_acc) / len(erroneous_step_acc) * 100 if erroneous_step_acc else 0.0
+        
+        print(f"Dataset: {dataset_type}")
+        print(f"  Correct Step Accuracy: {correct_acc:.2f}%")
+        print(f"  Erroneous Step Accuracy: {erroneous_acc:.2f}%")
+        print(f"  Average Accuracy: {(correct_acc + erroneous_acc) / 2:.2f}%")
+        print(f"  Harmonic Mean: {2 * correct_acc * erroneous_acc / (correct_acc + erroneous_acc) if (correct_acc + erroneous_acc) > 0 else 0:.2f}%")
+    print("="*30)
+
 
 if __name__ == "__main__":
     
@@ -263,134 +289,61 @@ if __name__ == "__main__":
         print("Local tokenizer not found, downloading from Hugging Face...")
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct", padding_side='left')
     
+    # 原始测试集
     prm800_data_path = os.path.join(spc_root_dir, "data", "eval", "prm_eval.json")
     process_bench_data_path = os.path.join(spc_root_dir, "data", "eval", "process_bench_eval.json")
     delta_bench_data_path = os.path.join(spc_root_dir, "data", "eval", "delta_bench_eval.json")
     
+    # 医学测试集
+    medical_data_paths = {
+        "MedQA": os.path.join(spc_root_dir, "data", "eval", "MedQA.json"),
+        "pubmedqa": os.path.join(spc_root_dir, "data", "eval", "pubmedqa.json"),
+    }
+    
     # 模型路径
-    critic_path = os.path.join(spc_main_dir, "check", "SPC-Critic-2")
+    critic_path = os.path.join(spc_main_dir, "check", "SPC-Critic-3-Medical")
 
-    # ==================== 原始测试集 ====================
+    # ==================== 五个测试集 ====================
     print("\n" + "="*50)
-    print("Testing Original Datasets")
+    print("Testing All Datasets")
     print("="*50)
     
+    # 1. ProcessBench
+    print("\n" + "="*20 + " ProcessBench " + "="*20)
     output_file = os.path.join(critic_path, "critique_process_bench.json")
     dataset = collect_process_bench_data()
     if len(dataset) > 0:
         generate_critique_batch(dataset)
     filter_process_bench_critique(data_type='process_bench')
  
+    # 2. PRM800
+    print("\n" + "="*20 + " PRM800 " + "="*20)
     output_file = os.path.join(critic_path, "critique_prm800.json")
     dataset = collect_prm800_data()
     if len(dataset) > 0:
         generate_critique_batch(dataset)
     filter_critique(data_type='prm')
 
+    # 3. DeltaBench
+    print("\n" + "="*20 + " DeltaBench " + "="*20)
     output_file = os.path.join(critic_path, "critique_delta_bench.json")
     dataset = collect_delta_bench_data()
     if len(dataset) > 0:
         generate_critique_batch(dataset)
     filter_critique(data_type='delta_bench')
 
-    # ==================== 新医学测试集 ====================
-    NEW_DATASETS = ['MedMCQA', 'MedQA', 'ddxplus', 'pubmedqa']
-    new_dataset_dir = os.path.join(spc_root_dir, "data", "eval", "new_dataset")
-    
-    print("\n" + "="*50)
-    print("Testing New Medical Datasets")
-    print("="*50)
-    
-    for dataset_name in NEW_DATASETS:
-        print(f"\n{'='*20} {dataset_name} {'='*20}")
-        
-        # ProcessBench 格式测试
-        process_bench_path = os.path.join(new_dataset_dir, dataset_name, f"{dataset_name.lower() if dataset_name != 'MedQA' else 'medqa'}_process_bench_eval.json")
-        if dataset_name == 'MedMCQA':
-            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "MedMCQA_process_bench_eval.json")
-        elif dataset_name == 'MedQA':
-            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "MedQA_process_bench_eval.json")
-        elif dataset_name == 'ddxplus':
-            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "ddxplus_process_bench_eval.json")
-        elif dataset_name == 'pubmedqa':
-            process_bench_path = os.path.join(new_dataset_dir, dataset_name, "pubmedqa_process_bench_eval.json")
-        
-        if os.path.exists(process_bench_path):
-            print(f"\n--- {dataset_name} ProcessBench ---")
-            output_file = os.path.join(critic_path, f"critique_{dataset_name}_process_bench.json")
-            with open(process_bench_path, "r", encoding="utf-8") as f:
-                dataset = json.load(f)
-            print(f"All {len(dataset)} data...")
-            if os.path.exists(output_file):
-                with open(output_file, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    existing_files = [json.loads(line)["file_name"] for line in lines]
-                dataset = [data for data in dataset if data["file_name"] not in existing_files]
-            print(f"should process {len(dataset)} files.")
-            if len(dataset) > 0:
-                generate_critique_batch(dataset)
-            filter_process_bench_critique(data_type='process_bench')
-        
-        # PRM 格式测试
-        prm_path = os.path.join(new_dataset_dir, dataset_name, f"{dataset_name.lower() if dataset_name != 'MedQA' else 'medqa'}_prm_eval.json")
-        if dataset_name == 'MedMCQA':
-            prm_path = os.path.join(new_dataset_dir, dataset_name, "MedMCQA_prm_eval.json")
-        elif dataset_name == 'MedQA':
-            prm_path = os.path.join(new_dataset_dir, dataset_name, "MedQA_prm_eval.json")
-        elif dataset_name == 'ddxplus':
-            prm_path = os.path.join(new_dataset_dir, dataset_name, "ddxplus_prm_eval.json")
-        elif dataset_name == 'pubmedqa':
-            prm_path = os.path.join(new_dataset_dir, dataset_name, "pubmedqa_prm_eval.json")
-        
-        if os.path.exists(prm_path):
-            print(f"\n--- {dataset_name} PRM ---")
-            output_file = os.path.join(critic_path, f"critique_{dataset_name}_prm.json")
-            with open(prm_path, "r", encoding="utf-8") as f:
-                raw_dataset = json.load(f)
-            merged_data = []
-            print(f"Processing {len(raw_dataset)} data...")
-            for i, data in enumerate(raw_dataset):
-                if data and isinstance(data, dict):
-                    problem = data["problem"]
-                    partial_solution = data["partial_solution"]
-                    correct_step = data["correct_last_step"]
-                    incorrect_step = data["incorrect_last_step"]
-                    data_id = str(data["id"])
-                    merged_data.append({"problem": problem, "partial_solution": partial_solution, "next_step": correct_step, "prm_human_label": 1, "file_name": data_id+"_c.json"})
-                    merged_data.append({"problem": problem, "partial_solution": partial_solution, "next_step": incorrect_step, "prm_human_label": -1, "file_name": data_id+"_i.json"})
-            if os.path.exists(output_file):
-                with open(output_file, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    existing_files = [json.loads(line)["file_name"] for line in lines]
-                merged_data = [data for data in merged_data if data["file_name"] not in existing_files]
-            print(f"should process {len(merged_data)} files.")
-            if len(merged_data) > 0:
-                generate_critique_batch(merged_data)
-            filter_critique(data_type='prm')
-        
-        # DeltaBench 格式测试
-        delta_path = os.path.join(new_dataset_dir, dataset_name, f"{dataset_name.lower() if dataset_name != 'MedQA' else 'medqa'}_delta_bench_eval.json")
-        if dataset_name == 'MedMCQA':
-            delta_path = os.path.join(new_dataset_dir, dataset_name, "MedMCQA_delta_bench_eval.json")
-        elif dataset_name == 'MedQA':
-            delta_path = os.path.join(new_dataset_dir, dataset_name, "MedQA_delta_bench_eval.json")
-        elif dataset_name == 'ddxplus':
-            delta_path = os.path.join(new_dataset_dir, dataset_name, "ddxplus_delta_bench_eval.json")
-        elif dataset_name == 'pubmedqa':
-            delta_path = os.path.join(new_dataset_dir, dataset_name, "pubmedqa_delta_bench_eval.json")
-        
-        if os.path.exists(delta_path):
-            print(f"\n--- {dataset_name} DeltaBench ---")
-            output_file = os.path.join(critic_path, f"critique_{dataset_name}_delta_bench.json")
-            with open(delta_path, "r", encoding="utf-8") as f:
-                dataset = json.load(f)
-            print(f"All {len(dataset)} data...")
-            if os.path.exists(output_file):
-                with open(output_file, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    existing_files = [json.loads(line)["file_name"] for line in lines]
-                dataset = [data for data in dataset if data["file_name"] not in existing_files]
-            print(f"should process {len(dataset)} files.")
-            if len(dataset) > 0:
-                generate_critique_batch(dataset)
-            filter_critique(data_type='delta_bench')
+    # 4. MedQA
+    print("\n" + "="*20 + " MedQA " + "="*20)
+    output_file = os.path.join(critic_path, "critique_MedQA.json")
+    dataset = collect_medical_data("MedQA")
+    if len(dataset) > 0:
+        generate_critique_batch(dataset)
+    filter_process_bench_critique(data_type='process_bench')
+
+    # 5. pubmedqa
+    print("\n" + "="*20 + " pubmedqa " + "="*20)
+    output_file = os.path.join(critic_path, "critique_pubmedqa.json")
+    dataset = collect_medical_data("pubmedqa")
+    if len(dataset) > 0:
+        generate_critique_batch(dataset)
+    filter_process_bench_critique(data_type='process_bench')

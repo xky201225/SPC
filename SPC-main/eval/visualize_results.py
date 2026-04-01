@@ -2,209 +2,275 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+from collections import defaultdict
+
+plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 
-def parse_critique_file(file_path, data_type='prm'):
-    with open(file_path, "r", encoding="utf-8") as f:
+def parse_result(response):
+    start_tag = "<Answer>"
+    end_tag = "</Answer>"
+    start_index = response.find(start_tag)
+    end_index = response.find(end_tag)
+    
+    if start_index == -1 or end_index == -1:
+        return 0
+    
+    start_index += len(start_tag)
+    result = response[start_index:end_index].strip().lower()
+    
+    if result == "correct":
+        return 1
+    elif result == "incorrect":
+        return -1
+    return 0
+
+
+def calculate_metrics(filepath, label_key="process_bench_human_label"):
+    if not os.path.exists(filepath):
+        return None
+    
+    with open(filepath, "r", encoding="utf-8") as f:
         lines = [json.loads(l) for l in f.readlines()]
     
-    lines = sorted(lines, key=lambda x: x["file_name"])
-    
-    data_total_num = len(lines)
-    data_valid_num = 0
-    correct_step_acc = []
-    erroneous_step_acc = []
+    total = len(lines)
+    valid = 0
+    correct_step_correct = 0
+    correct_step_total = 0
+    incorrect_step_correct = 0
+    incorrect_step_total = 0
     
     for data in lines:
-        correctness_label = 0
-        response = data["response"][0]
+        response = data.get("response", [""])[0]
+        pred = parse_result(response)
         
-        start_tag = "<Answer>"
-        end_tag = "</Answer>"
-        start_index = response.find(start_tag)
-        end_index = response.find(end_tag)
+        if pred == 0:
+            continue
         
-        if start_index != -1 and end_index != -1:
-            start_index += len(start_tag)
-            result = response[start_index:end_index]
-            if result.lower() == "correct":
-                correctness_label = 1
-                data_valid_num += 1
-            elif result.lower() == "incorrect":
-                correctness_label = -1
-                data_valid_num += 1
+        valid += 1
+        label = data.get(label_key, 0)
         
-        if correctness_label != 0:
-            human_label_key = f"{data_type}_human_label"
-            if human_label_key not in data:
-                for key in data.keys():
-                    if key.endswith("_human_label"):
-                        human_label_key = key
-                        break
-            
-            if human_label_key in data:
-                if data[human_label_key] == 1:
-                    if correctness_label == 1:
-                        correct_step_acc.append(1)
-                    else:
-                        correct_step_acc.append(0)
-                elif data[human_label_key] == -1:
-                    if correctness_label == -1:
-                        erroneous_step_acc.append(1)
-                    else:
-                        erroneous_step_acc.append(0)
+        if label == 1:
+            correct_step_total += 1
+            if pred == 1:
+                correct_step_correct += 1
+        elif label == -1:
+            incorrect_step_total += 1
+            if pred == -1:
+                incorrect_step_correct += 1
     
-    results = {
-        "total": data_total_num,
-        "valid_ratio": data_valid_num / data_total_num if data_total_num > 0 else 0,
-        "correct_acc": sum(correct_step_acc) / len(correct_step_acc) if correct_step_acc else 0,
-        "error_acc": sum(erroneous_step_acc) / len(erroneous_step_acc) if erroneous_step_acc else 0,
+    if correct_step_total == 0 or incorrect_step_total == 0:
+        return None
+    
+    correct_acc = correct_step_correct / correct_step_total
+    error_acc = incorrect_step_correct / incorrect_step_total
+    avg_acc = (correct_acc + error_acc) / 2
+    harmonic_mean = 2 * correct_acc * error_acc / (correct_acc + error_acc) if (correct_acc + error_acc) > 0 else 0
+    
+    return {
+        "total": total,
+        "valid": valid,
+        "valid_rate": valid / total if total > 0 else 0,
+        "correct_acc": correct_acc,
+        "error_acc": error_acc,
+        "avg_acc": avg_acc,
+        "harmonic_mean": harmonic_mean
     }
-    results["avg_acc"] = (results["correct_acc"] + results["error_acc"]) / 2
-    results["harmonic_mean"] = (2 * results["correct_acc"] * results["error_acc"] / 
-                                (results["correct_acc"] + results["error_acc"])) if (results["correct_acc"] + results["error_acc"]) > 0 else 0
+
+
+def plot_single_chart(results, names, title, output_path):
+    if not results:
+        return
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    harmonic_means = [results[n]["harmonic_mean"] * 100 for n in names if n in results]
+    correct_accs = [results[n]["correct_acc"] * 100 for n in names if n in results]
+    error_accs = [results[n]["error_acc"] * 100 for n in names if n in results]
+    valid_names = [n for n in names if n in results]
+    
+    x = np.arange(len(valid_names))
+    width = 0.25
+    
+    bars1 = ax.bar(x - width, correct_accs, width, label='Correct Step Acc', color='#27ae60')
+    bars2 = ax.bar(x, error_accs, width, label='Error Step Acc', color='#e74c3c')
+    bars3 = ax.bar(x + width, harmonic_means, width, label='Harmonic Mean', color='#3498db')
+    
+    ax.set_ylabel('Accuracy (%)', fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(valid_names, fontsize=11)
+    ax.set_ylim(0, 100)
+    ax.legend(loc='upper right')
+    ax.grid(axis='y', alpha=0.3)
+    
+    for bars, vals in [(bars1, correct_accs), (bars2, error_accs), (bars3, harmonic_means)]:
+        for bar, val in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, 
+                   f'{val:.1f}%', ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"Saved: {output_path}")
+    plt.show()
+
+
+def visualize_results(model_path, model_name="SPC-Critic"):
+    results = {}
+    
+    original_datasets = [
+        ("ProcessBench", "critique_process_bench.json", "process_bench_human_label"),
+        ("PRM800", "critique_prm800.json", "prm_human_label"),
+        ("DeltaBench", "critique_delta_bench.json", "delta_bench_human_label"),
+    ]
+    
+    medical_datasets = [
+        ("MedQA", "critique_MedQA.json", "process_bench_human_label"),
+        ("pubmedqa", "critique_pubmedqa.json", "process_bench_human_label"),
+    ]
+    
+    all_datasets = original_datasets + medical_datasets
+    
+    for name, filename, label_key in all_datasets:
+        filepath = os.path.join(model_path, filename)
+        metrics = calculate_metrics(filepath, label_key)
+        if metrics:
+            results[name] = metrics
+            print(f"{name}:")
+            print(f"  Total: {metrics['total']}, Valid: {metrics['valid']} ({metrics['valid_rate']*100:.1f}%)")
+            print(f"  Correct Step Acc: {metrics['correct_acc']*100:.2f}%")
+            print(f"  Error Step Acc: {metrics['error_acc']*100:.2f}%")
+            print(f"  Average Acc: {metrics['avg_acc']*100:.2f}%")
+            print(f"  Harmonic Mean: {metrics['harmonic_mean']*100:.2f}%")
+            print()
+    
+    if not results:
+        print("No results found!")
+        return
+    
+    original_names = ["ProcessBench", "PRM800", "DeltaBench"]
+    medical_names = ["MedQA", "pubmedqa"]
+    
+    original_results = {k: v for k, v in results.items() if k in original_names}
+    medical_results = {k: v for k, v in results.items() if k in medical_names}
+    
+    if original_results:
+        plot_single_chart(
+            original_results, 
+            original_names,
+            f'{model_name} - Original Benchmarks',
+            os.path.join(model_path, f"{model_name}_original.png")
+        )
+    
+    if medical_results:
+        plot_single_chart(
+            medical_results, 
+            medical_names,
+            f'{model_name} - Medical Benchmarks',
+            os.path.join(model_path, f"{model_name}_medical.png")
+        )
     
     return results
 
 
-def find_all_critique_files(base_path):
-    critique_files = []
-    for root, dirs, files in os.walk(base_path):
-        for file in files:
-            if file.startswith("critique_") and file.endswith(".json"):
-                critique_files.append(os.path.join(root, file))
-    return critique_files
-
-
-def parse_filename(filename):
-    basename = os.path.basename(filename)
-    name = basename.replace("critique_", "").replace(".json", "")
+def compare_models(models_info):
+    all_results = {}
     
-    parts = name.split("_")
+    original_datasets = [
+        ("ProcessBench", "critique_process_bench.json", "process_bench_human_label"),
+        ("PRM800", "critique_prm800.json", "prm_human_label"),
+        ("DeltaBench", "critique_delta_bench.json", "delta_bench_human_label"),
+    ]
     
-    if len(parts) >= 2:
-        if parts[-1] in ["prm", "process_bench", "delta_bench"]:
-            dataset_name = "_".join(parts[:-1])
-            format_type = parts[-1]
-        else:
-            dataset_name = name
-            format_type = "unknown"
-    else:
-        dataset_name = name
-        format_type = "unknown"
+    medical_datasets = [
+        ("MedQA", "critique_MedQA.json", "process_bench_human_label"),
+        ("pubmedqa", "critique_pubmedqa.json", "process_bench_human_label"),
+    ]
     
-    return dataset_name, format_type
-
-
-def save_single_result_chart(dataset_name, format_type, results, output_dir):
-    fig, ax = plt.subplots(figsize=(10, 6))
+    for model_name, model_path in models_info.items():
+        results = {}
+        
+        for name, filename, label_key in original_datasets + medical_datasets:
+            filepath = os.path.join(model_path, filename)
+            metrics = calculate_metrics(filepath, label_key)
+            if metrics:
+                results[name] = metrics
+        
+        all_results[model_name] = results
     
-    metrics = ['Correct Acc', 'Error Acc', 'Avg Acc', 'Harmonic Mean']
-    values = [results['correct_acc'], results['error_acc'], results['avg_acc'], results['harmonic_mean']]
-    colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12']
+    if not all_results:
+        print("No results found!")
+        return
     
-    x = np.arange(len(metrics))
-    bars = ax.bar(x, values, color=colors, width=0.6)
+    model_names = list(all_results.keys())
+    colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6']
     
-    ax.set_xlabel('Metrics')
-    ax.set_ylabel('Accuracy')
-    ax.set_title(f'{dataset_name} - {format_type}\n(Total: {results["total"]}, Valid: {results["valid_ratio"]*100:.1f}%)')
-    ax.set_xticks(x)
-    ax.set_xticklabels(metrics)
-    ax.set_ylim(0, 1)
+    def plot_comparison(dataset_names, title, output_filename):
+        common_datasets = [d for d in dataset_names if all(d in all_results[m] for m in model_names)]
+        if not common_datasets:
+            return
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        x = np.arange(len(common_datasets))
+        width = 0.8 / len(model_names)
+        
+        for i, model_name in enumerate(model_names):
+            harmonic_means = [all_results[model_name][ds]["harmonic_mean"] * 100 for ds in common_datasets]
+            bars = ax.bar(x + i * width - (len(model_names)-1) * width / 2, harmonic_means, width, 
+                         label=model_name, color=colors[i % len(colors)])
+            
+            for bar, val in zip(bars, harmonic_means):
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                       f'{val:.1f}', ha='center', va='bottom', fontsize=8)
+        
+        ax.set_ylabel('Harmonic Mean (%)')
+        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(common_datasets, fontsize=11)
+        ax.legend()
+        ax.set_ylim(0, 100)
+        ax.grid(axis='y', alpha=0.3)
+        
+        plt.tight_layout()
+        output_path = os.path.join(os.path.dirname(list(models_info.values())[0]), output_filename)
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"Saved: {output_path}")
+        plt.show()
     
-    for bar, val in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, 
-                f'{val:.3f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    original_names = ["ProcessBench", "PRM800", "DeltaBench"]
+    medical_names = ["MedQA", "pubmedqa"]
     
-    ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Baseline (0.5)')
-    ax.legend(loc='upper right')
-    
-    plt.tight_layout()
-    
-    output_path = os.path.join(output_dir, f"{dataset_name}_{format_type}.png")
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    print(f"  Saved: {output_path}")
-    plt.close()
-    
-    return output_path
-
-
-def print_results_table(results_dict):
-    print("\n" + "="*80)
-    print("TEST RESULTS SUMMARY")
-    print("="*80)
-    
-    datasets = sorted(set(k[0] for k in results_dict.keys()))
-    formats = ["prm", "process_bench", "delta_bench"]
-    
-    print(f"\n{'Dataset':<15} {'Format':<15} {'Total':<8} {'Valid%':<8} {'Correct':<10} {'Error':<10} {'Avg':<10} {'Harmonic':<10}")
-    print("-" * 95)
-    
-    for ds in datasets:
-        for fmt in formats:
-            key = (ds, fmt)
-            if key in results_dict:
-                r = results_dict[key]
-                print(f"{ds:<15} {fmt:<15} {r['total']:<8} {r['valid_ratio']*100:>6.1f}% {r['correct_acc']:>8.3f} {r['error_acc']:>8.3f} {r['avg_acc']:>8.3f} {r['harmonic_mean']:>8.3f}")
-        print("-" * 95)
+    plot_comparison(original_names, 'Model Comparison - Original Benchmarks', 'comparison_original.png')
+    plot_comparison(medical_names, 'Model Comparison - Medical Benchmarks', 'comparison_medical.png')
 
 
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     spc_main_dir = os.path.dirname(current_dir)
-    spc_root_dir = os.path.dirname(spc_main_dir)
     
-    critic_path = os.path.join(spc_main_dir, "check", "SPC-Critic-2")
-    output_dir = os.path.join(spc_main_dir, "eval", "charts")
+    print("="*60)
+    print("SPC-Critic-3-Medical Visualization")
+    print("="*60)
     
-    os.makedirs(output_dir, exist_ok=True)
+    model_path = os.path.join(spc_main_dir, "check", "SPC-Critic-3-Medical")
+    if os.path.exists(model_path):
+        visualize_results(model_path, "SPC-Critic-3-Medical")
+    else:
+        print(f"Model path not found: {model_path}")
     
-    print(f"Searching for critique files in: {critic_path}")
-    critique_files = find_all_critique_files(critic_path)
+    print("\n" + "="*60)
+    print("Model Comparison")
+    print("="*60)
     
-    if not critique_files:
-        print("No critique files found. Please check the path.")
-        print(f"Expected path: {critic_path}")
-        exit(1)
+    models_to_compare = {
+        "SPC-Critic-2": os.path.join(spc_main_dir, "check", "SPC-Critic-2"),
+        "SPC-Critic-3-Medical": os.path.join(spc_main_dir, "check", "SPC-Critic-3-Medical"),
+    }
     
-    print(f"Found {len(critique_files)} critique files:")
-    for f in critique_files:
-        print(f"  - {os.path.basename(f)}")
-    
-    results_dict = {}
-    saved_charts = []
-    
-    print(f"\nGenerating charts in: {output_dir}")
-    print("-" * 50)
-    
-    for file_path in critique_files:
-        dataset_name, format_type = parse_filename(file_path)
-        print(f"\nProcessing: {os.path.basename(file_path)}")
-        print(f"  Dataset: {dataset_name}, Format: {format_type}")
-        
-        data_type = format_type
-        results = parse_critique_file(file_path, data_type=data_type)
-        results_dict[(dataset_name, format_type)] = results
-        
-        print(f"  Total: {results['total']}, Valid: {results['valid_ratio']*100:.1f}%")
-        print(f"  Correct Acc: {results['correct_acc']:.3f}, Error Acc: {results['error_acc']:.3f}")
-        print(f"  Avg Acc: {results['avg_acc']:.3f}, Harmonic: {results['harmonic_mean']:.3f}")
-        
-        chart_path = save_single_result_chart(dataset_name, format_type, results, output_dir)
-        saved_charts.append(chart_path)
-    
-    print_results_table(results_dict)
-    
-    print(f"\n" + "="*50)
-    print(f"Generated {len(saved_charts)} charts in: {output_dir}")
-    print("="*50)
-    
-    results_json_path = os.path.join(spc_main_dir, "eval", "test_results_summary.json")
-    json_results = {}
-    for (ds, fmt), vals in results_dict.items():
-        key = f"{ds}_{fmt}"
-        json_results[key] = vals
-    with open(results_json_path, "w", encoding="utf-8") as f:
-        json.dump(json_results, f, indent=2, ensure_ascii=False)
-    print(f"\nResults saved to: {results_json_path}")
+    existing_models = {k: v for k, v in models_to_compare.items() if os.path.exists(v)}
+    if len(existing_models) >= 2:
+        compare_models(existing_models)
+    else:
+        print("Need at least 2 models for comparison")

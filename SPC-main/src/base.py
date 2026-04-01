@@ -136,7 +136,7 @@ class BaseTrainer(Trainer):
                 self._stored_metrics[train_eval][key].append(value)
 
 
-    def log(self, logs: Dict[str, float]) -> None:
+    def log(self, logs: Dict[str, float], start_time: float = None) -> None:
         train_eval = "train" if "loss" in logs else "eval"
         for key, metrics in self._stored_metrics[train_eval].items():
             try:
@@ -146,4 +146,6 @@ class BaseTrainer(Trainer):
                 # print(key)
                 # print(metrics)
         del self._stored_metrics[train_eval]
+        if start_time is not None:
+            return super().log(logs, start_time)
         return super().log(logs)

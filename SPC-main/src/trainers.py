@@ -49,7 +49,7 @@ class OfflineWeightedPolicyTrainer(BaseTrainer):
 
         return BaseTrainer.logprobs_from_logits(shift_logits, shift_labels, gather)
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         if self.args.debug_mode:
             print_rank_0(f"check inputs :{inputs}")
             
@@ -61,10 +61,12 @@ class OfflineWeightedPolicyTrainer(BaseTrainer):
 
         with torch.no_grad():
             self.ref_model.eval()
+            ref_device = next(self.ref_model.parameters()).device
             ref_model_outputs = self.ref_model(
-                input_ids=inputs['input_ids'],
-                attention_mask=inputs['attention_mask']
+                input_ids=inputs['input_ids'].to(ref_device),
+                attention_mask=inputs['attention_mask'].to(ref_device)
             )
+            ref_model_outputs.logits = ref_model_outputs.logits.to(inputs['input_ids'].device)
 
         
         logprobs, mask = compute_lm_loglikeli(model_outputs.logits, inputs['labels'])
